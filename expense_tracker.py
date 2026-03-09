@@ -10,7 +10,13 @@ import plotly.graph_objects as go
 from datetime import datetime
 import os
 
-EXPENSES_FILE = "expenses.csv"
+DATA_DIR = "user_data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def get_expenses_file(username: str) -> str:
+    """Return the CSV path for a given username (sanitized)."""
+    safe = "".join(c for c in username.strip().lower() if c.isalnum() or c in ("_", "-"))
+    return os.path.join(DATA_DIR, f"{safe}.csv")
 
 st.set_page_config(
     page_title="Expense Tracker",
@@ -291,23 +297,25 @@ COLOR_SEQ = ["#58a6ff", "#bc8cff", "#ff7b72", "#3fb950", "#ffa657",
 
 # ---------------------- DATA FUNCTIONS ----------------------
 
-def load_expenses():
-    if os.path.exists(EXPENSES_FILE):
-        df = pd.read_csv(EXPENSES_FILE)
+def load_expenses(username: str):
+    path = get_expenses_file(username)
+    if os.path.exists(path):
+        df = pd.read_csv(path)
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"])
         return df
     return pd.DataFrame(columns=["Date", "Category", "Amount", "Description"])
 
 
-def save_expenses(df):
+def save_expenses(df, username: str):
+    path = get_expenses_file(username)
     if not df.empty:
         df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-    df.to_csv(EXPENSES_FILE, index=False)
+    df.to_csv(path, index=False)
 
 
-def add_expense(date, category, amount, description):
-    df = load_expenses()
+def add_expense(date, category, amount, description, username: str):
+    df = load_expenses(username)
     new = pd.DataFrame({
         "Date": [date],
         "Category": [category],
@@ -315,14 +323,14 @@ def add_expense(date, category, amount, description):
         "Description": [description],
     })
     df = pd.concat([df, new], ignore_index=True)
-    save_expenses(df)
+    save_expenses(df, username)
     return df
 
 
-def delete_expense(index):
-    df = load_expenses()
+def delete_expense(index, username: str):
+    df = load_expenses(username)
     df = df.drop(index).reset_index(drop=True)
-    save_expenses(df)
+    save_expenses(df, username)
     return df
 
 
@@ -345,6 +353,40 @@ def get_categories():
 
 def main():
 
+    # ── USER LOGIN ────────────────────────────────────────
+    if "username" not in st.session_state:
+        st.session_state.username = None
+
+    if not st.session_state.username:
+        st.markdown("<h1>💰 Expense Tracker</h1>", unsafe_allow_html=True)
+        st.markdown(
+            "<p class='subtitle'>Track, analyze, and master your spending</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        col_center, _, _ = st.columns([2, 1, 1])
+        with col_center:
+            st.markdown(
+                "<div style='background:#161b22;border:1px solid #21262d;border-radius:16px;"
+                "padding:32px 28px;max-width:420px;'>"
+                "<h3 style='text-align:center;margin-bottom:4px;'>👋 Welcome!</h3>"
+                "<p style='text-align:center;color:#8b949e;font-size:0.9rem;"
+                "margin-bottom:20px;'>Enter your name to view or create your expense profile.</p>",
+                unsafe_allow_html=True,
+            )
+            name_input = st.text_input("Your Name", placeholder="e.g. Alice", label_visibility="collapsed")
+            if st.button("Continue →", type="primary", use_container_width=True):
+                if name_input.strip():
+                    st.session_state.username = name_input.strip()
+                    st.rerun()
+                else:
+                    st.warning("Please enter your name to continue.")
+            st.markdown("</div>", unsafe_allow_html=True)
+        return  # Stop rendering until logged in
+
+    username = st.session_state.username
+
     if "expense_date" not in st.session_state:
         st.session_state.expense_date = datetime.now().date()
     if "expense_category" not in st.session_state:
@@ -354,7 +396,7 @@ def main():
     if "expense_description" not in st.session_state:
         st.session_state.expense_description = ""
 
-    df = load_expenses()
+    df = load_expenses(username)
 
     # ── SIDEBAR ──────────────────────────────────────────
     with st.sidebar:
@@ -365,10 +407,18 @@ def main():
             unsafe_allow_html=True,
         )
         st.markdown(
+            f"<p style='text-align:center;color:#58a6ff;font-size:0.9rem;"
+            f"margin-bottom:4px;font-weight:600;'>👤 {username}</p>"
             "<p style='text-align:center;color:#484f58;font-size:0.8rem;"
-            "margin-bottom:20px;'>Your spending, at a glance</p>",
+            "margin-bottom:12px;'>Your spending, at a glance</p>",
             unsafe_allow_html=True,
         )
+        if st.button("🔄 Switch User", use_container_width=True):
+            for key in ["username", "expense_date", "expense_category",
+                        "expense_amount", "expense_description",
+                        "delete_idx", "delete_confirm"]:
+                st.session_state.pop(key, None)
+            st.rerun()
         st.markdown("---")
 
         if not df.empty:
@@ -413,7 +463,7 @@ def main():
     # ── HEADER ───────────────────────────────────────────
     st.markdown("<h1>💰 Expense Tracker</h1>", unsafe_allow_html=True)
     st.markdown(
-        "<p class='subtitle'>Track, analyze, and master your spending</p>",
+        f"<p class='subtitle'>Welcome back, <strong style='color:#58a6ff'>{username}</strong> — Track, analyze, and master your spending</p>",
         unsafe_allow_html=True,
     )
 
@@ -436,7 +486,7 @@ def main():
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("＋  Add Expense", type="primary", use_container_width=True):
             if amount > 0:
-                add_expense(date, category, amount, description)
+                add_expense(date, category, amount, description, username)
                 st.success("✅ Expense added successfully!")
                 st.rerun()
 
@@ -556,7 +606,7 @@ def main():
                 with c_confirm:
                     st.markdown("<div class='del-btn'>", unsafe_allow_html=True)
                     if st.button("🗑️  Yes, Delete", use_container_width=True, type="primary"):
-                        delete_expense(st.session_state.delete_idx)
+                        delete_expense(st.session_state.delete_idx, username)
                         st.session_state.delete_idx = None
                         st.session_state.delete_confirm = False
                         st.success("✅ Record deleted successfully.")
